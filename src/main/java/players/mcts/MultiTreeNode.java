@@ -33,17 +33,18 @@ public class MultiTreeNode extends SingleTreeNode {
         this.forwardModel = player.getForwardModel();
         if (params.information == MCTSEnums.Information.Closed_Loop)
            params.information = MCTSEnums.Information.Open_Loop;
-        // Closed Loop is not yet supported for MultiTree search
+        // TODO: Closed Loop is not yet supported for MultiTree search
         // TODO: implement this (not too difficult, but some tricky bits as we shift from tree to rollout and back again)
 
         this.rnd = rnd;
         mctsPlayer = player;
-        // only root node maintains MAST statistics
+        // only root node (this) maintains MAST statistics
         MASTStatistics = new ArrayList<>();
         for (int i = 0; i < state.getNPlayers(); i++)
             MASTStatistics.add(new HashMap<>());
         if (params.useMASTAsActionHeuristic) {
-            params.actionHeuristic = new MASTActionHeuristic(MASTStatistics, params.MASTActionKey, params.MASTDefaultValue);
+            params.actionHeuristic = new MASTActionHeuristic(params.MASTActionKey, params.MASTDefaultValue);
+            ((MASTActionHeuristic) params.actionHeuristic).setMASTStats(MASTStatistics);
         }
         instantiate(null, null, state);
 
@@ -179,6 +180,12 @@ public class MultiTreeNode extends SingleTreeNode {
     @Override
     public AbstractAction bestAction() {
         return roots[decisionPlayer].bestAction();
+    }
+
+    @Override
+    public double getValue(AbstractAction action) {
+        // delegate to the root for the decision player
+        return roots[decisionPlayer].getValue(action);
     }
 
     public SingleTreeNode getRoot(int player) {

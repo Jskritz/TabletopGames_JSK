@@ -32,6 +32,7 @@ public abstract class AbstractTournament implements IGameRunner {
     protected Game game;
     // Number of players in the games, index matches the games list
     protected int nPlayers;
+    protected TournamentResults tournamentResults;
     protected String resultsFile = "TournamentResults.txt";
     // Filename to write the results of the tournament
 
@@ -53,5 +54,22 @@ public abstract class AbstractTournament implements IGameRunner {
                 gameToPlay.createGameInstance(nPlayerPerGame, gameParams);
 
         this.nPlayers = nPlayerPerGame;
+        this.tournamentResults = new TournamentResults();
+    }
+
+    public TournamentResults getTournamentResults() {
+        return tournamentResults;
+    }
+
+    public void setTournamentResults(TournamentResults results) {
+        this.tournamentResults = results;
+    }
+
+    public void setResultsFile(String resultsFile) {
+        this.resultsFile = resultsFile;
+    }
+
+    public Game getGame() {
+        return game;
     }
 }

@@ -3,7 +3,10 @@ package core.components;
 import core.AbstractGameState;
 import core.CoreConstants.VisibilityMode;
 import org.jetbrains.annotations.NotNull;
+import org.json.simple.JSONArray;
+import org.json.simple.JSONObject;
 import utilities.DeterminisationUtilities;
+import utilities.JSONUtils;
 import utilities.Pair;
 
 import java.util.*;
@@ -48,7 +51,7 @@ public class PartialObservableDeck<T extends Component> extends Deck<T> {
         }
     }
 
-    private PartialObservableDeck(String name, int ownerID, boolean[] defaultVisibility, int ID) {
+    protected PartialObservableDeck(String name, int ownerID, boolean[] defaultVisibility, int ID) {
         super(name, ownerID, ID, VisibilityMode.MIXED_VISIBILITY);
         this.deckVisibility = defaultVisibility;
     }
@@ -122,6 +125,7 @@ public class PartialObservableDeck<T extends Component> extends Deck<T> {
                         " but at least one entry is of length " + b.length);
         this.elementVisibility = visibility;
     }
+
     private void applyVisibilityMode() {
         if (getVisibilityMode() == VisibilityMode.TOP_VISIBLE_TO_ALL)
             for (int j = 0; j < deckVisibility.length; j++)
@@ -268,12 +272,9 @@ public class PartialObservableDeck<T extends Component> extends Deck<T> {
     }
 
     @Override
-    public boolean remove(int idx) {
-        if (super.remove(idx)) {
-            elementVisibility.remove(idx);
-            return true;
-        }
-        return false;
+    public void remove(int idx) {
+        super.remove(idx);
+        elementVisibility.remove(idx);
     }
 
     @Override
@@ -286,6 +287,7 @@ public class PartialObservableDeck<T extends Component> extends Deck<T> {
      * Shuffles the deck, and updates the visibility of the components accordingly.
      * After a shuffle players will no longer know the position of the cards they could see before the shuffle
      * (this resets the visibility of all components to the default deck visibility).
+     *
      * @param rnd
      */
     @Override
@@ -346,6 +348,48 @@ public class PartialObservableDeck<T extends Component> extends Deck<T> {
 
     public boolean[] getDeckVisibility() {
         return deckVisibility;
+    }
+
+    /**
+     * Serializes the runtime state of this deck, including the per-deck and per-component visibility
+     * (which {@link Deck#equals} does not compare, but which is essential to preserve hidden
+     * information across a save/load). As for {@link Deck#toJSON}, every component must implement
+     * {@link core.interfaces.IToJSON}. Reconstruct with {@link #loadDeck}.
+     */
+    @Override
+    @SuppressWarnings("unchecked")
+    public JSONObject toJSON() {
+        JSONObject json = super.toJSON();
+        json.put("deckVisibility", JSONUtils.booleanArrayToJSON(deckVisibility));
+        JSONArray elementVis = new JSONArray();
+        for (boolean[] vis : elementVisibility)
+            elementVis.add(JSONUtils.booleanArrayToJSON(vis));
+        json.put("elementVisibility", elementVis);
+        return json;
+    }
+
+    /**
+     * Reconstructs a PartialObservableDeck from JSON produced by {@link #toJSON}, restoring the
+     * components (each via its {@link JSONObject} constructor), the deck visibility and the
+     * per-component visibility exactly.
+     *
+     * @param json - the JSON produced by {@link #toJSON}.
+     */
+    public static <T extends Component> PartialObservableDeck<T> loadDeck(JSONObject json) {
+        boolean[] deckVisibility = JSONUtils.booleanArrayFromJSON((JSONArray) json.get("deckVisibility"));
+        PartialObservableDeck<T> deck = new PartialObservableDeck<>((String) json.get("name"),
+                ((Number) json.get("ownerId")).intValue(), deckVisibility,
+                ((Number) json.get("id")).intValue());
+        // set the visibility mode directly (not via setVisibility, which would re-derive element
+        // visibility) as we restore the exact per-component visibility below
+        deck.visibility = VisibilityMode.valueOf((String) json.get("visibility"));
+        deck.capacity = ((Number) json.get("capacity")).intValue();
+        populateComponents(deck, json);
+        List<boolean[]> elementVisibility = new LinkedList<>();
+        for (Object o : (JSONArray) json.get("elementVisibility"))
+            elementVisibility.add(JSONUtils.booleanArrayFromJSON((JSONArray) o));
+        deck.elementVisibility = elementVisibility;
+        return deck;
     }
 
     @Override

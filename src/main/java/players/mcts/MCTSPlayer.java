@@ -4,7 +4,6 @@ import core.AbstractForwardModel;
 import core.AbstractGameState;
 import core.AbstractPlayer;
 import core.actions.AbstractAction;
-import core.interfaces.IActionHeuristic;
 import evaluation.listeners.IGameListener;
 import core.interfaces.IStateHeuristic;
 import evaluation.metrics.Event;
@@ -14,8 +13,6 @@ import utilities.Pair;
 import utilities.Utils;
 
 import java.util.*;
-import java.util.function.BiFunction;
-import java.util.function.Function;
 import java.util.function.Supplier;
 import java.util.stream.Collectors;
 
@@ -43,6 +40,7 @@ public class MCTSPlayer extends AbstractPlayer implements IAnyTimePlayer, IHasSt
     public MCTSPlayer(MCTSParams params, String name) {
         super(params, name);
         rnd = new Random(parameters.getRandomSeed());
+        considerSingletonActions = true;
     }
 
     @Override
@@ -56,7 +54,7 @@ public class MCTSPlayer extends AbstractPlayer implements IAnyTimePlayer, IHasSt
             rnd = new Random(parameters.getRandomSeed());
             getParameters().rolloutPolicy = null;
             getParameters().getRolloutStrategy();
-            getParameters().opponentModel = null;  // thi swill force reconstruction from random seed
+            getParameters().opponentModel = null;  // this will force reconstruction from random seed
             getParameters().getOpponentModel();
             //       System.out.println("Resetting seed for MCTS player to " + params.getRandomSeed());
         }
@@ -67,6 +65,7 @@ public class MCTSPlayer extends AbstractPlayer implements IAnyTimePlayer, IHasSt
         oldGraphKeys = new HashMap<>();
         getParameters().getRolloutStrategy().initializePlayer(state);
         getParameters().getOpponentModel().initializePlayer(state);
+        super.initializePlayer(state);
     }
 
     /**
@@ -235,7 +234,11 @@ public class MCTSPlayer extends AbstractPlayer implements IAnyTimePlayer, IHasSt
             }
         }
         if (!foundPointInHistory) {
-            throw new AssertionError("Unable to find matching action in history : " + lastExpected);
+            String message = String.format("Agent: %s, P%d unable to find matching action in history : %s%n\t\t%b:%s%d%n%s", this, rootPlayer, lastExpected,
+                    params.reuseTree, params.opponentTreePolicy, params.maxTreeDepth,
+                    history.reversed().stream().limit(20).map(p -> String.format("%d:%s", p.a, p.b)).collect(Collectors.joining("\n\t\t")));
+            System.out.println(message);
+            throw new AssertionError(message);
         }
         if (debug)
             System.out.println("\tBacktracking complete : " + (newRoot == null ? "no matching node found" : "node found"));
@@ -247,8 +250,15 @@ public class MCTSPlayer extends AbstractPlayer implements IAnyTimePlayer, IHasSt
         if (newRoot == null) {
             if (getParameters().opponentTreePolicy == MultiTree)
                 root = new MultiTreeNode(this, gameState, rnd);
-            else
-                root = SingleTreeNode.createRootNode(this, gameState, rnd, getFactory());
+            else {
+                if(getParameters().numDeterminizations > 1)
+                {
+                    root = new ForestNode(this, gameState, rnd);
+                }
+                else {
+                    root = SingleTreeNode.createRootNode(this, gameState, rnd, getFactory());
+                }
+            }
         } else {
             root = newRoot;
         }
@@ -258,17 +268,20 @@ public class MCTSPlayer extends AbstractPlayer implements IAnyTimePlayer, IHasSt
                     .collect(Collectors.toList());
 
         if (getParameters().getRolloutStrategy() instanceof IMASTUser) {
-            ((IMASTUser) getParameters().getRolloutStrategy()).setStats(root.MASTStatistics);
+            ((IMASTUser) getParameters().getRolloutStrategy()).setMASTStats(root.MASTStatistics);
         }
         if (getParameters().getOpponentModel() instanceof IMASTUser) {
-            ((IMASTUser) getParameters().getOpponentModel()).setStats(root.MASTStatistics);
+            ((IMASTUser) getParameters().getOpponentModel()).setMASTStats(root.MASTStatistics);
         }
     }
 
     @Override
     public AbstractAction _getAction(AbstractGameState gameState, List<AbstractAction> actions) {
         // Search for best action from the root
+        if (actions.size() == 1)
+            return actions.getFirst();  // take the only action available
         long currentTimeNano = System.nanoTime();
+        // creating the root node also sets the Forward Model (and wraps it in any decorators)
         createRootNode(gameState);
         long timeTaken = System.nanoTime() - currentTimeNano;
 
@@ -293,8 +306,33 @@ public class MCTSPlayer extends AbstractPlayer implements IAnyTimePlayer, IHasSt
 
         if (root.children.size() > 3 * actions.size() && !(root instanceof MCGSNode) && !getParameters().reuseTree && !getParameters().actionSpace.equals(gameState.getCoreGameParameters().actionSpace))
             throw new AssertionError(String.format("Unexpectedly large number of children: %d with action size of %d", root.children.size(), actions.size()));
-        lastAction = new Pair<>(gameState.getCurrentPlayer(), root.bestAction());
+        lastAction = Pair.of(gameState.getCurrentPlayer(), root.bestAction());
         return lastAction.b.copy();
+    }
+
+    @Override
+    public void overrideAction(AbstractAction originalAction, AbstractAction override) {
+        if (!lastAction.b.equals(originalAction)) {
+            throw new IllegalArgumentException("Original action does not match the last action taken" + lastAction.b + " vs " + originalAction);
+        }
+        lastAction = Pair.of(lastAction.a, override.copy());
+    }
+
+    public double getValue(AbstractAction action) {
+        return root.getValue(action);
+    }
+    // Proportion of visits - this does not take account of nValidVisits (which would be especially important away from root node)
+    public double getVisitProportion(AbstractAction action) {
+        return root.actionVisits(action) / (double) root.getVisits();
+    }
+    public int getVisits(AbstractAction action) {
+        return root.actionVisits(action);
+    }
+    public int getRootVisits() {
+        return root.getVisits();
+    }
+    public SingleTreeNode getRoot() {
+        return root;
     }
 
     @Override
@@ -329,21 +367,32 @@ public class MCTSPlayer extends AbstractPlayer implements IAnyTimePlayer, IHasSt
     public Map<AbstractAction, Map<String, Object>> getDecisionStats() {
         Map<AbstractAction, Map<String, Object>> retValue = new LinkedHashMap<>();
 
+        // no decision statistics
+        if (root == null)
+            return retValue;
+
+        int players = root.state.getNPlayers();
         if (root != null && root.getVisits() > 1) {
             for (AbstractAction action : root.actionValues.keySet()) {
                 ActionStats stats = root.actionValues.get(action);
                 int visits = stats == null ? 0 : stats.nVisits;
                 double visitProportion = visits / (double) root.getVisits();
-                double meanValue = stats == null || visits == 0 ? 0.0 : stats.totValue[root.decisionPlayer] / visits;
-                double heuristicValue = getParameters().heuristic.evaluateState(root.state, root.decisionPlayer);
+                double[] meanValues = new double[players];
+                double[] heuristicValues = new double[players];
+                if (stats != null && visits > 0) {
+                    for (int p = 0; p < players; p++) {
+                        meanValues[p] = stats.totValue[p] / visits;
+                        heuristicValues[p] = getStateHeuristic().evaluateState(root.getState(), p);
+                    }
+                }
                 double actionValue = getParameters().actionHeuristic.evaluateAction(action, root.state, root.actionsFromOpenLoopState);
 
                 Map<String, Object> actionValues = new HashMap<>();
                 actionValues.put("visits", visits);
                 actionValues.put("visitProportion", visitProportion);
-                actionValues.put("meanValue", meanValue);
-                actionValues.put("heuristic", heuristicValue);
-                actionValues.put("actionValue", actionValue);
+                actionValues.put("nodeValue", meanValues);
+                actionValues.put("heuristicValue", heuristicValues);
+                actionValues.put("actionHeuristicValue", actionValue);
                 retValue.put(action, actionValues);
             }
         }

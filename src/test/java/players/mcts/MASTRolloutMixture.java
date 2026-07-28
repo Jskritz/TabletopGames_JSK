@@ -1,13 +1,13 @@
 package players.mcts;
 
-import core.AbstractGameState;
+import core.AbstractPlayer;
+import core.Game;
 import core.actions.AbstractAction;
 import core.interfaces.IActionHeuristic;
+import games.loveletter.LoveLetterForwardModel;
+import games.loveletter.LoveLetterGameState;
 import org.junit.Before;
 import org.junit.Test;
-import players.PlayerConstants;
-import players.simple.BoltzmannActionParams;
-import players.simple.BoltzmannActionPlayer;
 import utilities.Pair;
 
 import java.util.*;
@@ -22,7 +22,7 @@ public class MASTRolloutMixture {
     LMRForwardModel fm = new LMRForwardModel();
     LMRGame game = new LMRGame(new LMTParameters(302));
     Random rnd = new Random(303897);
-    STNWithTestInstrumentation node;
+    SingleTreeNode node;
 
     List<AbstractAction> baseActions = List.of(new LMRAction("Left"), new LMRAction("Middle"), new LMRAction("Right"));
 
@@ -35,9 +35,9 @@ public class MASTRolloutMixture {
     private void initialiseMCTSPlayer() {
         // after setting params up in test
         params._reset();
-        player = new TestMCTSPlayer(params, STNWithTestInstrumentation::new);
+        player = new TestMCTSPlayer(params);
         player.setForwardModel(fm);
-        node = (STNWithTestInstrumentation) SingleTreeNode.createRootNode(player, game, rnd, STNWithTestInstrumentation::new);
+        node = SingleTreeNode.createRootNode(player, game, rnd, SingleTreeNode::new);
     }
 
     @Test
@@ -49,7 +49,7 @@ public class MASTRolloutMixture {
         assertTrue(player.getParameters().getRolloutStrategy() instanceof MASTPlayer);
         assertTrue(player.getParameters().useMAST);
         MASTPlayer rolloutPlayer = (MASTPlayer) player.getParameters().rolloutPolicy;
-        rolloutPlayer.setStats(node.MASTStatistics); // link rollout player to MAST statistics
+        rolloutPlayer.setMASTStats(node.MASTStatistics); // link rollout player to MAST statistics
 
         node.backUpSingleNode(new LMRAction("Left"), new double[]{1.0});
         // Create a singleton list with Left action
@@ -83,7 +83,7 @@ public class MASTRolloutMixture {
         assertTrue(player.getParameters().getRolloutStrategy() instanceof MASTPlayer);
         assertTrue(player.getParameters().useMAST);
         MASTPlayer rolloutPlayer = (MASTPlayer) player.getParameters().rolloutPolicy;
-        rolloutPlayer.setStats(node.MASTStatistics); // link rollout player to MAST statistics
+        rolloutPlayer.setMASTStats(node.MASTStatistics); // link rollout player to MAST statistics
 
         node.backUpSingleNode(new LMRAction("Left"), new double[]{1.0});
         // Create a singleton list with Left action
@@ -123,7 +123,7 @@ public class MASTRolloutMixture {
 
         MASTPlayer rolloutPlayer = (MASTPlayer) player.getParameters().rolloutPolicy;
         assertTrue(rolloutPlayer.getActionHeuristic() instanceof MASTPlusActionHeuristic);
-        rolloutPlayer.setStats(node.MASTStatistics); // link rollout player to MAST statistics
+        rolloutPlayer.setMASTStats(node.MASTStatistics); // link rollout player to MAST statistics
 
         node.backUpSingleNode(new LMRAction("Left"), new double[]{1.0});
         // Create a singleton list with Left action
@@ -144,4 +144,5 @@ public class MASTRolloutMixture {
         assertEquals(0.207, rolloutPlayer.probabilityOf(new LMRAction("Middle"), game, baseActions), 0.001);
         assertEquals(0.207, rolloutPlayer.probabilityOf(new LMRAction("Right"), game, baseActions), 0.001);
     }
+
 }

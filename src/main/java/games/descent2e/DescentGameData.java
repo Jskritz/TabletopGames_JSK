@@ -108,6 +108,15 @@ public class DescentGameData extends AbstractGameData {
         return null;
     }
 
+    public Hero findHero(String name) {
+        for (Hero h: heroes) {
+            if (h.getComponentName().equalsIgnoreCase(name)) {
+                return h.copy();
+            }
+        }
+        throw new IllegalArgumentException("Hero not found: " + name);
+    }
+
     public List<Hero> findHeroes(DescentTypes.Archetype archetype) {
         List<Hero> heroes = new ArrayList<>();
         for (Hero f: this.heroes) {
@@ -300,19 +309,19 @@ public class DescentGameData extends AbstractGameData {
             for (Object o : data) {
                 JSONObject obj = (JSONObject) o;
 
-                String key = (String) obj.get("id");
+                String key = (String) obj.get("name");
                 Monster superT = new Monster();
                 HashSet<String> ignoreKeys = new HashSet<String>(){{
                     add("act1");
                     add("act2");
-                    add("id");
+                    add("name");
                 }};
 
                 superT.loadFigure(obj, ignoreKeys);
 
                 ignoreKeys.clear();
-                ignoreKeys.add("type");
-                ignoreKeys.add("id");
+                ignoreKeys.add("tokenType");
+                ignoreKeys.add("name");
 
                 HashMap<String, Monster> monsterDef = new HashMap<>();
                 Monster act1m = new Monster();

@@ -2,17 +2,13 @@ package evaluation.listeners;
 
 import core.*;
 import core.actions.AbstractAction;
+import core.interfaces.IStateHeuristic;
 import core.interfaces.IStatisticLogger;
 import evaluation.loggers.FileStatsLogger;
 import evaluation.metrics.Event;
-import utilities.Utils;
 
-import java.io.File;
 import java.util.*;
 import java.util.stream.IntStream;
-
-import static evaluation.metrics.IDataLogger.ReportDestination.ToBoth;
-import static evaluation.metrics.IDataLogger.ReportDestination.ToFile;
 
 /**
  * This provides a generic way of recording training data from games. After each move is made, it will record a feature
@@ -22,19 +18,58 @@ import static evaluation.metrics.IDataLogger.ReportDestination.ToFile;
  */
 public abstract class FeatureListener implements IGameListener {
 
-    List<StateFeatureListener.LocalDataWrapper> currentData = new ArrayList<>();
-    Event.GameEvent frequency;
+    // currentData is the data specified by the feature vector
+    // overrideData is then used to override the final values recorded at the end of the game
+    protected List<StateFeatureListener.LocalDataWrapper> currentData = new ArrayList<>();
+    protected Event.GameEvent frequency;
     boolean currentPlayerOnly;
-    IStatisticLogger logger;
-    Game game;
+    protected IStatisticLogger logger;
+    protected Game game;
+    protected double sampleRate = 1.0; // what proportion of events to record
+    protected Random rnd = new Random();
+    protected boolean recordEndGameState = true;
+    protected IStateHeuristic heuristic;
 
     protected FeatureListener(Event.GameEvent frequency, boolean currentPlayerOnly) {
         this.currentPlayerOnly = currentPlayerOnly;
         this.frequency = frequency;
     }
+    protected FeatureListener(Event.GameEvent frequency, boolean currentPlayerOnly, IStateHeuristic heuristic) {
+        this(frequency, currentPlayerOnly);
+        this.heuristic = heuristic;
+    }
 
-    public void setLogger(IStatisticLogger logger) {
+    public FeatureListener setLogger(IStatisticLogger logger) {
+        if (logger != null) {
+            logger.processDataAndFinish();
+        }
         this.logger = logger;
+        return this;
+    }
+
+    public FeatureListener setSampleRate(double rate) {
+        if (rate <= 0 || rate > 1.0) throw new IllegalArgumentException("Sample rate must be in the range (0,1]");
+        sampleRate = rate;
+        return this;
+    }
+
+    public FeatureListener setStateHeuristic(IStateHeuristic heuristic) {
+        this.heuristic = heuristic;
+        return this;
+    }
+
+
+    @Override
+    public boolean setOutputDirectory(String... nestedDirectories) {
+        if (logger instanceof FileStatsLogger fileLogger) {
+            fileLogger.setOutputDirectory(nestedDirectories);
+        }
+        return true;
+    }
+
+    public FeatureListener recordEndGameState(boolean recordEndGameState) {
+        this.recordEndGameState = recordEndGameState;
+        return this;
     }
 
     @Override
@@ -42,28 +77,27 @@ public abstract class FeatureListener implements IGameListener {
 
         if (event.type == frequency && frequency != Event.GameEvent.GAME_OVER) {
             // if GAME_OVER, then we cover this a few lines down
-            processState(event.state, event.action);
+
+            // we only sample rare events. This is to (optionally) generate sparser and less correlated data
+            // If we record every event, then successive events are highly correlated (of course, sometimes we need the
+            // complete trajectory)
+            if (rnd.nextDouble() > sampleRate) {
+                return;
+            }
+            processState(event.state, event.action, event.actions, event.playerID);
         }
 
         if (event.type == Event.GameEvent.GAME_OVER) {
             // first we record a final state for each player
-            processState(event.state, null);
+            if (recordEndGameState)
+                processState(event.state, null, Collections.emptyList(), event.playerID);
 
             // now we can update the result
             writeDataWithStandardHeaders(event.state);
         }
     }
 
-    @Override
-    public boolean setOutputDirectory(String... nestedDirectories) {
-
-        if (logger instanceof FileStatsLogger fileLogger) {
-            fileLogger.setOutPutDirectory(nestedDirectories);
-        }
-        return true;
-    }
-
-    protected void writeDataWithStandardHeaders(AbstractGameState state) {
+    public void writeDataWithStandardHeaders(AbstractGameState state) {
         int totP = state.getNPlayers();
         double[] finalScores = IntStream.range(0, totP).mapToDouble(state::getGameScore).toArray();
         double[] winLoss = Arrays.stream(state.getPlayerResults()).mapToDouble(r -> switch (r) {
@@ -73,33 +107,58 @@ public abstract class FeatureListener implements IGameListener {
         }).toArray();
         double[] ordinal = IntStream.range(0, totP).mapToDouble(state::getOrdinalPosition).toArray();
         double finalRound = state.getRoundCounter();
+
         for (StateFeatureListener.LocalDataWrapper record : currentData) {
             // we use a LinkedHashMap so that the order of the keys is preserved, and hence the
             // data is written to file in a sensible order for human viewing
-            Map<String, Double> data = new LinkedHashMap<>();
-            data.put("GameID", (double) state.getGameID());
-            data.put("Player", (double) record.player);
-            data.put("Round", (double) record.gameRound);
-            data.put("Turn", (double) record.gameTurn);
+            Map<String, Object> data = new LinkedHashMap<>();
+            data.put("GameID", state.getGameID());
+            data.put("Player", record.player);
+            data.put("Round", record.gameRound);
+            data.put("Turn", record.gameTurn);
             data.put("CurrentScore", record.currentScore);
-            for (int i = 0; i < record.array.length; i++) {
-                data.put(names()[i], record.array[i]);
+            for (String key : record.values.keySet()) {
+                data.put(key, record.values.get(key));
             }
-            data.put("PlayerCount", (double) getGame().getPlayers().size());
+  //          System.out.printf("Recording data....Game: %d, Player: %d, Round: %d, Turn: %d%n",  state.getGameID(), record.player, record.gameRound, record.gameTurn);
+            data.put("PlayerCount", getGame().getPlayers().size());
             data.put("TotalRounds", finalRound);
-            data.put("TotalTurns", (double) state.getTurnCounter());
-            data.put("TotalTicks", (double) state.getGameTick());
-            for (int i = 0; i < record.actionScores.length; i++) {
-                data.put(record.actionScoreNames[i], record.actionScores[i]);
+            data.put("TotalTurns", state.getTurnCounter());
+            data.put("TotalTicks", state.getGameTick());
+            for (String actionKey : record.actionValues.keySet()) {
+                data.put(actionKey, record.actionValues.get(actionKey));
             }
-            data.put("Win", winLoss[record.player]);
-            data.put("Ordinal", ordinal[record.player]);
-            data.put("FinalScore", finalScores[record.player]);
+            // We record the actual results of the game. If the sub-class Listener has not
+            // set the corresponding Target fields (Win, Ordinal, FinalScore, FinalScoreAdv), then
+            // we set these to default to the actual end game values.
+
+            data.put("ActualWin", winLoss[record.player]);
+            if (!data.containsKey("Win")) {
+                data.put("Win", winLoss[record.player]);
+            }
+            double heuristicScore = heuristic == null ?
+                    state.getHeuristicScore(record.player) :
+                    heuristic.evaluateState(state, record.player);
+            data.put("Heuristic", heuristicScore);
+            if (!data.containsKey("FinalHeuristic")) {
+                data.put("FinalHeuristic", heuristicScore);
+            }
+            data.put("ActualOrdinal", ordinal[record.player]);
+            if (!data.containsKey("Ordinal")) {
+                data.put("Ordinal", ordinal[record.player]);
+            }
+            data.put("ActualScore", finalScores[record.player]);
+            if (!data.containsKey("FinalScore")) {
+                data.put("FinalScore", finalScores[record.player]);
+            }
             double bestOtherScore = IntStream.range(0, totP)
                     .filter(p -> p != record.player)
                     .mapToDouble(i -> finalScores[i])
                     .max().orElse(0);
-            data.put("FinalScoreAdv", finalScores[record.player] - bestOtherScore);
+            data.put("ActualScoreAdv", finalScores[record.player] - bestOtherScore);
+            if (!data.containsKey("FinalScoreAdv")) {
+                data.put("FinalScoreAdv", finalScores[record.player] - bestOtherScore);
+            }
             logger.record(data);
         }
         logger.processDataAndNotFinish();
@@ -121,60 +180,106 @@ public abstract class FeatureListener implements IGameListener {
         return game;
     }
 
+    public abstract double[] extractDoubleVector(AbstractAction action, AbstractGameState state, int perspectivePlayer);
+
+    /*
+     * Override this if the feature vector is not all numeric
+     */
+    public abstract Object[] extractFeatureVector(AbstractAction action, AbstractGameState state, int perspectivePlayer);
+
     public abstract String[] names();
 
-    public abstract double[] extractFeatureVector(AbstractAction action, AbstractGameState state, int perspectivePlayer);
 
-
-    /**
-     * this takes in the raw JSON string of an agent definition, and applies appropriate
-     * string replacements to inject the relevant features to use. The two standards are:
-     * *PHI* for an IStateFeatureVector implementation
-     * *PSI* for an IActionFeatureVector implementation
-     *
-     * @param raw
-     * @return
-     */
-    public abstract String injectAgentAttributes(String raw);
-
-    public void processState(AbstractGameState state, AbstractAction action) {
+    public void preProcessing(AbstractGameState state, AbstractAction action) {
+        // for extension in sub-classes
+    }
+    public void processState(AbstractGameState state, AbstractAction action, List<AbstractAction> allActions, int currentPlayer) {
         // we record one state for each player after each relevant event occurs
-        if (currentPlayerOnly && state.isNotTerminal()) {
-            int p = state.getCurrentPlayer();
-            double[] phi = extractFeatureVector(action, state, p);
-            currentData.add(new StateFeatureListener.LocalDataWrapper(p, phi, state, new HashMap<>()));
+        // we first determine if the data is double[] or Object[]
+        preProcessing(state, action);
+        boolean endOfGame = state.isGameOver();
+        if (endOfGame)
+            currentPlayer = state.getCurrentPlayer(); // instead of -1
+        boolean isDouble = true;
+        double[] doubleData = new double[0];
+        try {
+            doubleData = extractDoubleVector(action, state, currentPlayer);
+        } catch (UnsupportedOperationException e) {
+            isDouble = false;
+        }
+        if (currentPlayerOnly && (endOfGame || state.isNotTerminalForPlayer(currentPlayer))) {
+            if (isDouble) {
+                currentData.add(LocalDataWrapper.factory(currentPlayer, doubleData, names(), state, new HashMap<>()));
+            } else {
+                Object[] phi = extractFeatureVector(action, state, currentPlayer);
+                currentData.add(LocalDataWrapper.factory(currentPlayer, phi, names(), state, new HashMap<>()));
+            }
         } else {
             for (int p = 0; p < state.getNPlayers(); p++) {
-                double[] phi = extractFeatureVector(action, state, p);
-                currentData.add(new StateFeatureListener.LocalDataWrapper(p, phi, state, new HashMap<>()));
+                if (endOfGame || state.isNotTerminalForPlayer(p)) {
+                    if (isDouble) {
+                        double[] phi = p == currentPlayer ? doubleData : extractDoubleVector(action, state, p);
+                        currentData.add(LocalDataWrapper.factory(p, phi, names(), state, new HashMap<>()));
+                    } else {
+                        Object[] phi = extractFeatureVector(action, state, p);
+                        currentData.add(LocalDataWrapper.factory(p, phi, names(), state, new HashMap<>()));
+                    }
+                }
             }
         }
     }
 
+    public void addValueToLastRecord(String key, Object value) {
+        if (currentData.isEmpty()) {
+            throw new IllegalStateException("No records available to add value to. Ensure processState has been called before adding values.");
+        }
+        StateFeatureListener.LocalDataWrapper lastRecord = currentData.get(currentData.size() - 1);
+        lastRecord.addValue(key, value);
+    }
+
     // To avoid incessant boxing / unboxing if we were to use Double
-    static class LocalDataWrapper {
+    protected static class LocalDataWrapper {
         final int player;
         final int gameTurn;
         final int gameRound;
         final double currentScore;
-        final double[] actionScores;
-        final String[] actionScoreNames;
-        final double[] array;
+        private final Map<String, Object> values;
+        private final Map<String, Number> actionValues = new HashMap<>();
 
-        LocalDataWrapper(int player, double[] contents, AbstractGameState state, Map<String, Double> actionScore) {
-            array = contents;
+        LocalDataWrapper(int player, Map<String, Object> data, AbstractGameState state, Map<String, Number> actionScore) {
+            values = new LinkedHashMap<>(data);
             this.gameTurn = state.getTurnCounter();
             this.gameRound = state.getRoundCounter();
             this.player = player;
             this.currentScore = state.getGameScore(player);
-            this.actionScores = new double[actionScore.size()];
-            this.actionScoreNames = new String[actionScore.size()];
-            int i = 0;
-            for (String key : actionScore.keySet()) {
-                actionScoreNames[i] = key;
-                actionScores[i] = actionScore.get(key);
-                i++;
+            if (actionScore != null) {
+                this.actionValues.putAll(actionScore);
             }
         }
+
+        public void addValue(String key, Object value) {
+            values.put(key, value);
+        }
+
+        public void getValue(String key) {
+            values.get(key);
+        }
+
+        public static LocalDataWrapper factory(int player, double[] contents, String[] names, AbstractGameState state, Map<String, Number> actionScore) {
+            Object[] values = new Object[contents.length];
+            for (int i = 0; i < contents.length; i++) {
+                values[i] = contents[i];
+            }
+            return factory(player, values, names, state, actionScore);
+        }
+
+        public static LocalDataWrapper factory(int player, Object[] contents, String[] names, AbstractGameState state, Map<String, Number> actionScore) {
+            Map<String, Object> values = new LinkedHashMap<>();
+            for (int i = 0; i < contents.length; i++) {
+                values.put(names[i], contents[i]);
+            }
+            return new LocalDataWrapper(player, values, state, actionScore);
+        }
+
     }
 }

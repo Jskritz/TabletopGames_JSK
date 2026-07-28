@@ -4,16 +4,10 @@ import core.AbstractPlayer;
 import evaluation.RunArg;
 import evaluation.optimisation.ntbea.SolutionEvaluator;
 import evaluation.tournaments.RoundRobinTournament;
-import org.json.simple.JSONObject;
-import org.json.simple.parser.JSONParser;
-import org.json.simple.parser.ParseException;
 import utilities.Pair;
 import utilities.Utils;
 
 import java.io.File;
-import java.io.FileNotFoundException;
-import java.io.FileReader;
-import java.io.IOException;
 import java.util.*;
 import java.util.stream.IntStream;
 
@@ -37,22 +31,8 @@ public class OneStepDeviations {
 
     public static void main(String[] args) {
 
+        // parseConfig already merges any config= file with CLI overrides, CLI taking precedence
         Map<RunArg, Object> config = parseConfig(args, Collections.singletonList(RunArg.Usage.ParameterSearch));
-
-        String setupFile = config.getOrDefault(RunArg.config, "").toString();
-        if (!setupFile.isEmpty()) {
-            // Read from file instead
-            try {
-                FileReader reader = new FileReader(setupFile);
-                JSONParser parser = new JSONParser();
-                JSONObject json = (JSONObject) parser.parse(reader);
-                config = parseConfig(json, RunArg.Usage.ParameterSearch);
-            } catch (FileNotFoundException ignored) {
-                throw new AssertionError("Config file not found : " + setupFile);
-            } catch (IOException | ParseException e) {
-                throw new RuntimeException(e);
-            }
-        }
 
         NTBEAParameters params = new NTBEAParameters(config);
         ITPSearchSpace<?> searchSpace = (ITPSearchSpace<?>) params.searchSpace;
@@ -74,7 +54,6 @@ public class OneStepDeviations {
         List<List<Integer>> playerSettings = new ArrayList<>();
 
         playerSettings.add(Arrays.stream(baseSettings).boxed().toList()); // dummy for baseline agent
-        int nextIndex = 1;
         for (int i = 0; i < baseSettings.length; i++) {
             for (int j = 0; j < params.searchSpace.nValues(i); j++) {
                 if (j == baseSettings[i]) {
@@ -83,7 +62,6 @@ public class OneStepDeviations {
                 int[] settings = baseSettings.clone();
                 settings[i] = j;
                 playerSettings.add(Arrays.stream(settings).boxed().toList());
-                nextIndex++;
             }
         }
 
@@ -260,7 +238,6 @@ public class OneStepDeviations {
                             totalScore.add(0.0);
                             totalScoreSquared.add(0.0);
                             stillUnderConsideration.add(true);
-                            nextIndex++;
                             if (params.verbose)
                                 System.out.printf("Adding new player %s with settings %s%n", getAgentName(combinedSettingsArray, baseSettings),
                                         Arrays.toString(combinedSettingsArray));
@@ -270,7 +247,7 @@ public class OneStepDeviations {
             }
             iteration++;
             numberStillUnderConsideration = (int) stillUnderConsideration.stream().filter(b -> b).count();
-            finished = numberStillUnderConsideration <= params.nPlayers + 2 || iteration >= params.repeats;
+            finished = numberStillUnderConsideration <= params.nPlayers + 2 || iteration > params.repeats;
 
         } while (!finished);
 
