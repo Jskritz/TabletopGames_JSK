@@ -13,10 +13,8 @@
       {"class": "evaluation.metrics.GameMetrics$ComputationTimes" },
       {"class": "evaluation.metrics.GameMetrics$Decisions" },
       {"class": "evaluation.metrics.GameMetrics$Actions" },
-      {"class": "games.dominion.metrics.DominionMetrics$PreferredCard" },
-      {"class": "games.dominion.metrics.DominionMetrics$CardsInSupplyGameEnd" },
-      {"class": "games.dominion.metrics.DominionMetrics$EmptySupplySlots" },
-      {"class": "games.dominion.metrics.DominionMetrics$GameSeeds" },
-      {"class": "games.dominion.metrics.DominionMetrics$ActionFeatures" }
+      {"class": "games.stirfry18.metrics.SF18Metrics$CookList"},
+      {"class": "games.stirfry18.metrics.SF18Metrics$DiscardedCards"},
+      {"class": "games.stirfry18.metrics.SF18Metrics$FavoredCards"}
     ]]
 }
