@@ -22,4 +22,11 @@ public class BTCGTypes {
         FadingBlood
         // TODO: add images
     }
+
+    public enum GamePhase{
+        StartTurn,
+        Scramble,
+        Brawl,
+        EndTurn
+    }
 }

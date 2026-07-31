@@ -4,12 +4,43 @@ import core.AbstractGameState;
 import core.AbstractGameStateWithTurnOrder;
 import core.AbstractParameters;
 import core.components.Component;
+import core.components.Counter;
+import core.components.Deck;
 import core.turnorders.TurnOrder;
 import games.GameType;
+import games.bountiestcg.components.BTCGBoardSpace;
+import games.bountiestcg.components.BTCGCard;
 
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 
 public class BTCGGameState extends AbstractGameState {
+
+    // Card Areas
+    Deck<BTCGCard>[] decks;
+    Deck<BTCGCard>[] hands;
+    Deck<BTCGCard>[] discard;
+    Deck<BTCGCard>[] graveyard;
+    Deck<BTCGCard>[] stack;
+
+    // Board Spaces
+    HashSet<BTCGBoardSpace> stages;
+    HashSet<BTCGBoardSpace>[] fighters;
+    HashSet<BTCGBoardSpace>[] equipments;
+
+    // Resources
+    HashMap<BTCGTypes.Resource, Counter>[] bounties;
+    HashMap<BTCGTypes.Resource, Counter>[] fadingBlood;
+    HashMap<BTCGTypes.Resource, Counter>[] blood;
+
+    // Game Variables
+    BTCGTypes.GamePhase gamePhase;
+    Counter turnNumber;
+
+
+
+
     /**
      * Constructor. Initialises some generic game state variables.
      *
