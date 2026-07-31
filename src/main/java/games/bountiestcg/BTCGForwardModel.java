@@ -1,12 +1,12 @@
 package games.bountiestcg;
 
 import core.AbstractGameState;
-import core.StandardForwardModelWithTurnOrder;
+import core.StandardForwardModel;
 import core.actions.AbstractAction;
 
 import java.util.List;
 
-public class BTCGForwardModel extends StandardForwardModelWithTurnOrder {
+public class BTCGForwardModel extends StandardForwardModel {
     @Override
     protected void _afterAction(AbstractGameState currentState, AbstractAction actionTaken) {
 

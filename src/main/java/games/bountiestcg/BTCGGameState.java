@@ -1,5 +1,6 @@
 package games.bountiestcg;
 
+import core.AbstractGameState;
 import core.AbstractGameStateWithTurnOrder;
 import core.AbstractParameters;
 import core.components.Component;
@@ -8,7 +9,7 @@ import games.GameType;
 
 import java.util.List;
 
-public class BTCGGameState extends AbstractGameStateWithTurnOrder {
+public class BTCGGameState extends AbstractGameState {
     /**
      * Constructor. Initialises some generic game state variables.
      *
@@ -20,16 +21,6 @@ public class BTCGGameState extends AbstractGameStateWithTurnOrder {
     }
 
     @Override
-    protected TurnOrder _createTurnOrder(int nPlayers) {
-        return null;
-    }
-
-    @Override
-    protected AbstractGameStateWithTurnOrder __copy(int playerId) {
-        return null;
-    }
-
-    @Override
     protected GameType _getGameType() {
         return null;
     }
@@ -37,6 +28,11 @@ public class BTCGGameState extends AbstractGameStateWithTurnOrder {
     @Override
     protected List<Component> _getAllComponents() {
         return List.of();
+    }
+
+    @Override
+    protected AbstractGameState _copy(int playerId) {
+        return null;
     }
 
     @Override
